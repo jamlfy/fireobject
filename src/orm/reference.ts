@@ -5,6 +5,8 @@ import {
 } from '@google-cloud/firestore';
 import { FireObject } from './object';
 import { fireDataMap } from './state';
+import { setRelationMetadata } from './relation-metadata';
+import { isDocumentReference } from './is-document-reference';
 
 type ModelType = new (
   data: DocumentSnapshot<DocumentData> | Record<string, unknown>,
@@ -38,6 +40,7 @@ function resolveType(type: ModelTypeThunk): ModelType {
 export function reference(targetType: ModelTypeThunk) {
   return function (target: object, propertyKey: string | symbol): void {
     const key = String(propertyKey);
+    setRelationMetadata(target, key, targetType);
 
     Object.defineProperty(target, key, {
       configurable: true,
@@ -53,7 +56,7 @@ export function reference(targetType: ModelTypeThunk) {
         if (!raw) return Array.isArray(raw) ? [] : null;
 
         const hydrate = async (value: unknown): Promise<unknown> => {
-          if (!(value instanceof DocumentReference)) return value;
+          if (!isDocumentReference(value)) return value;
           const snapshot = await value.get();
           return snapshot.exists
             ? new (resolveType(targetType))(snapshot)
@@ -80,7 +83,7 @@ export function reference(targetType: ModelTypeThunk) {
           item &&
           typeof item === 'object' &&
           !(item instanceof FireObject) &&
-          !(item instanceof DocumentReference)
+          !isDocumentReference(item)
             ? new Model(item as Record<string, unknown>)
             : item;
         data.values.set(

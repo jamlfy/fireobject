@@ -1,3 +1,4 @@
+import { Filter } from '@google-cloud/firestore';
 import type {
   DocumentSnapshot,
   FieldPath,
@@ -40,7 +41,15 @@ export class QueryBuilder<
   }
 
   /**
-   * Adds a filter.
+   * Adds a composed Firestore filter.
+   *
+   * @param filter - Filter created with `Filter.where`, `Filter.and`, or
+   * `Filter.or`.
+   * @returns This builder.
+   */
+  where(filter: Filter): this;
+  /**
+   * Adds a field filter.
    *
    * @param field - Model field or Firestore field path.
    * @param operator - Firestore comparison operator.
@@ -51,8 +60,20 @@ export class QueryBuilder<
     field: K | FieldPath,
     operator: WhereFilterOp,
     value: unknown,
+  ): this;
+  where<K extends ModelField<T>>(
+    fieldOrFilter: Filter | K | FieldPath,
+    operator?: WhereFilterOp,
+    value?: unknown,
   ): this {
-    this.#query = this.#query.where(field as string | FieldPath, operator, value);
+    if (fieldOrFilter instanceof Filter)
+      this.#query = this.#query.where(fieldOrFilter);
+    else
+      this.#query = this.#query.where(
+        fieldOrFilter as string | FieldPath,
+        operator as WhereFilterOp,
+        value,
+      );
     return this;
   }
 
@@ -168,6 +189,21 @@ export class QueryBuilder<
   async first(): Promise<T | null> {
     const items = await this.limit(1).get();
     return items[0] ?? null;
+  }
+
+  /**
+   * Checks whether at least one document matches the query.
+   *
+   * @returns `true` when a matching document exists.
+   * @throws `QueryError` when Firestore rejects the query.
+   */
+  async exists(): Promise<boolean> {
+    try {
+      const snapshot = await this.#query.limit(1).get();
+      return snapshot.docs.length > 0;
+    } catch (error) {
+      throw new QueryError('Firestore exists query failed', error);
+    }
   }
 
   /**

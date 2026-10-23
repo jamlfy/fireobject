@@ -29,49 +29,107 @@ const same = (left: unknown, right: unknown): boolean => {
   return JSON.stringify(left) === JSON.stringify(right);
 };
 
+type FieldCondition = {
+  kind: 'field';
+  field: string;
+  operator: string;
+  value: unknown;
+};
+
+type GroupCondition = {
+  kind: 'and' | 'or';
+  filters: FakeCondition[];
+};
+
+type FakeCondition = FieldCondition | GroupCondition;
+
+const fieldName = (field: unknown): string => {
+  if (typeof field === 'string') return field;
+  const segments = (field as { segments?: unknown[] } | null)?.segments;
+  return Array.isArray(segments) && segments[0] === '__name__'
+    ? '__id__'
+    : String(field);
+};
+
+const normalizeCondition = (value: unknown): FakeCondition => {
+  const filter = value as {
+    filters?: unknown[];
+    operator?: string;
+    field?: unknown;
+    value?: unknown;
+  };
+  if (Array.isArray(filter?.filters))
+    return {
+      kind: filter.operator === 'OR' ? 'or' : 'and',
+      filters: filter.filters.map(normalizeCondition),
+    };
+  return {
+    kind: 'field',
+    field: fieldName(filter?.field),
+    operator: filter?.operator ?? '==',
+    value: filter?.value,
+  };
+};
+
+const matchesCondition = (
+  data: Record<string, unknown>,
+  path: string,
+  condition: FakeCondition,
+): boolean => {
+  if (condition.kind === 'or')
+    return condition.filters.some((filter) =>
+      matchesCondition(data, path, filter),
+    );
+  if (condition.kind === 'and')
+    return condition.filters.every((filter) =>
+      matchesCondition(data, path, filter),
+    );
+
+  const current =
+    condition.field === '__id__'
+      ? path.split('/').pop()
+      : data[condition.field];
+  const { operator, value } = condition;
+  switch (operator) {
+    case '==':
+      return same(current, value);
+    case '!=':
+      return !same(current, value);
+    case '<':
+      return (current as number) < (value as number);
+    case '<=':
+      return (current as number) <= (value as number);
+    case '>':
+      return (current as number) > (value as number);
+    case '>=':
+      return (current as number) >= (value as number);
+    case 'in':
+      return (value as unknown[]).some((item) => same(current, item));
+    case 'not-in':
+      return !(value as unknown[]).some((item) => same(current, item));
+    case 'array-contains':
+      return (
+        Array.isArray(current) &&
+        current.some((item) => same(item, value))
+      );
+    case 'array-contains-any':
+      return (
+        Array.isArray(current) &&
+        (value as unknown[]).some((item) =>
+          current.some((entry) => same(entry, item)),
+        )
+      );
+    default:
+      throw new Error(`Unsupported operator ${operator}`);
+  }
+};
+
 const matches = (
   data: Record<string, unknown>,
-  conditions: Array<{
-    field: string;
-    operator: string;
-    value: unknown;
-  }>,
+  path: string,
+  conditions: FakeCondition[],
 ): boolean =>
-  conditions.every(({ field, operator, value }) => {
-    const current = data[field];
-    switch (operator) {
-      case '==':
-        return same(current, value);
-      case '!=':
-        return !same(current, value);
-      case '<':
-        return (current as number) < (value as number);
-      case '<=':
-        return (current as number) <= (value as number);
-      case '>':
-        return (current as number) > (value as number);
-      case '>=':
-        return (current as number) >= (value as number);
-      case 'in':
-        return (value as unknown[]).some((item) => same(current, item));
-      case 'not-in':
-        return !(value as unknown[]).some((item) => same(current, item));
-      case 'array-contains':
-        return (
-          Array.isArray(current) &&
-          current.some((item) => same(item, value))
-        );
-      case 'array-contains-any':
-        return (
-          Array.isArray(current) &&
-          (value as unknown[]).some((item) =>
-            current.some((entry) => same(entry, item)),
-          )
-        );
-      default:
-        throw new Error(`Unsupported operator ${operator}`);
-    }
-  });
+  conditions.every((condition) => matchesCondition(data, path, condition));
 
 const rawSnapshot = (
   path: string,
@@ -159,7 +217,7 @@ class FakeQuery {
     readonly path: string,
     readonly converter?: FirestoreDataConverter<unknown>,
     readonly state: {
-      where?: Array<{ field: string; operator: string; value: unknown }>;
+      where?: FakeCondition[];
       order?: Array<{ field: string; direction: 'asc' | 'desc' }>;
       limit?: number;
       offset?: number;
@@ -174,9 +232,22 @@ class FakeQuery {
     });
   }
 
-  where(field: string, operator: string, value: unknown): FakeQuery {
+  where(
+    fieldOrFilter: unknown,
+    operator?: string,
+    value?: unknown,
+  ): FakeQuery {
+    const condition =
+      typeof operator === 'string'
+        ? {
+            kind: 'field' as const,
+            field: fieldName(fieldOrFilter),
+            operator,
+            value,
+          }
+        : normalizeCondition(fieldOrFilter);
     return this.clone({
-      where: [...(this.state.where ?? []), { field, operator, value }],
+      where: [...(this.state.where ?? []), condition],
     });
   }
 
@@ -214,8 +285,8 @@ class FakeQuery {
     let entries = [...records.entries()]
       .filter(([path]) => path.split('/')[0] === this.path)
       .map(([path, data]) => ({ path, data }));
-    entries = entries.filter(({ data }) =>
-      matches(data, this.state.where ?? []),
+    entries = entries.filter(({ path, data }) =>
+      matches(data, path, this.state.where ?? []),
     );
     for (const { field, direction } of [...(this.state.order ?? [])].reverse())
       entries.sort((left, right) => {
@@ -297,8 +368,7 @@ function collectionReference(
       records.set(`${path}/${id}`, { ...data });
       return ref;
     },
-    where: (...args: Parameters<Query['where']>) =>
-      query.where(...(args as [string, string, unknown])),
+    where: (...args: unknown[]) => query.where(...args),
     orderBy: (...args: Parameters<Query['orderBy']>) =>
       query.orderBy(...(args as [string, 'asc' | 'desc'])),
     limit: (limit: number) => query.limit(limit),

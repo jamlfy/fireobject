@@ -65,6 +65,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "src"
   ],
   "sideEffects": false,

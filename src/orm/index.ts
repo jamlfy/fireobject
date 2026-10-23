@@ -5,6 +5,7 @@
  * query builder, field values, and public types.
  */
 export { Connector } from './connector';
+export { Filter } from '@google-cloud/firestore';
 export { converter } from './converter';
 export { field } from './field';
 export { FireObject } from './object';
@@ -25,14 +26,6 @@ export {
   ValidationError,
 } from './errors';
 export type { UniqueFieldOptions } from './unique-metadata';
-export {
-  FieldValue,
-  arrayRemove,
-  arrayUnion,
-  deleteField,
-  increment,
-  serverTimestamp,
-} from './values';
 export type {
   BulkCreateOptions,
   BulkDeleteOptions,

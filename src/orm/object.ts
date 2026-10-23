@@ -8,6 +8,7 @@ import {
   FieldValue as FirestoreFieldValue,
   Firestore,
   FirestoreDataConverter,
+  Filter,
   OrderByDirection,
   Query,
   Timestamp,
@@ -22,6 +23,7 @@ import type {
   BulkDeleteOptions,
   CreateOptions,
   FireObjectConstructor,
+  FireObjectTypeThunk,
   ModelData,
   ModelField,
   MutationOptions,
@@ -49,6 +51,8 @@ import {
   instancePathParams,
 } from './path';
 import { QueryBuilder } from './query';
+import { relationMetadataFor } from './relation-metadata';
+import { isDocumentReference } from './is-document-reference';
 
 /** Minimal constructor type used to infer the concrete model type. */
 type ModelConstructor<T extends FireObject<any>> = new (
@@ -66,6 +70,20 @@ function modelConstructor<T extends FireObject<any>>(
   value: ModelConstructor<T>,
 ): FireObjectConstructor<T> {
   return value as unknown as FireObjectConstructor<T>;
+}
+
+/**
+ * Resolves a relation target provided directly or through a lazy thunk.
+ *
+ * @param type - Model constructor or function returning it.
+ * @returns The resolved model constructor.
+ */
+function resolveRelationType(
+  type: FireObjectTypeThunk,
+): ModelConstructor<FireObject<any>> {
+  return type.prototype instanceof FireObject
+    ? (type as unknown as ModelConstructor<FireObject<any>>)
+    : (type as () => ModelConstructor<FireObject<any>>)();
 }
 
 /** Error used consistently when a model has no Firestore binding. */
@@ -289,12 +307,29 @@ export abstract class FireObject<
    */
   static where<T extends FireObject<any>>(
     this: ModelConstructor<T>,
+    filter: Filter,
+  ): QueryBuilder<T>;
+  static where<T extends FireObject<any>>(
+    this: ModelConstructor<T>,
     field: ModelField<T> | FieldPath,
     operator: WhereFilterOp,
     value: unknown,
+  ): QueryBuilder<T>;
+  static where<T extends FireObject<any>>(
+    this: ModelConstructor<T>,
+    fieldOrFilter: Filter | ModelField<T> | FieldPath,
+    operator?: WhereFilterOp,
+    value?: unknown,
   ): QueryBuilder<T> {
     const Model = modelConstructor(this);
-    return new QueryBuilder(Model.collection()).where(field, operator, value);
+    const builder = new QueryBuilder(Model.collection());
+    return fieldOrFilter instanceof Filter
+      ? builder.where(fieldOrFilter)
+      : builder.where(
+          fieldOrFilter as ModelField<T> | FieldPath,
+          operator as WhereFilterOp,
+          value,
+        );
   }
 
   /**
@@ -328,6 +363,76 @@ export abstract class FireObject<
   }
 
   /**
+   * Loads reference-backed relations for several models.
+   *
+   * Referenced documents are fetched in parallel and cached in the model
+   * instances, so later reads of the relation property do not perform another
+   * Firestore read. Missing documents become `null` (or are removed from
+   * relation arrays).
+   *
+   * @param models - Models whose relations should be loaded.
+   * @param fields - Relation property names. Defaults to every relation.
+   * @returns The same models with their relations cached.
+   */
+  static async populate<T extends FireObject<any>>(
+    this: ModelConstructor<T>,
+    models: ReadonlyArray<T>,
+    ...fields: string[]
+  ): Promise<T[]> {
+    const entries: Array<{
+      model: T;
+      key: string;
+      type: FireObjectTypeThunk;
+      raw: unknown;
+    }> = [];
+    const loadAll = fields.length === 0;
+
+    for (const model of models) {
+      for (const [key, type] of relationMetadataFor(model)) {
+        if (!loadAll && !fields.includes(key)) continue;
+        const raw = fireDataMap.get(model)?.values.get(key);
+        if (raw === undefined || raw === null) continue;
+        entries.push({ model, key, type, raw });
+      }
+    }
+
+    const references = new Map<string, DocumentReference<DocumentData>>();
+    for (const entry of entries) {
+      const values = Array.isArray(entry.raw) ? entry.raw : [entry.raw];
+      for (const value of values)
+        if (isDocumentReference(value) && !references.has(value.path))
+          references.set(value.path, value);
+    }
+
+    const snapshots = new Map<string, DocumentSnapshot<DocumentData>>();
+    await Promise.all(
+      [...references.values()].map(async (reference) => {
+        snapshots.set(reference.path, await reference.get());
+      }),
+    );
+
+    for (const entry of entries) {
+      const hydrate = (value: unknown): FireObject<any> | null => {
+        if (!isDocumentReference(value)) return value as FireObject<any>;
+        const snapshot = snapshots.get(value.path);
+        if (!snapshot?.exists) return null;
+        const data = snapshot.data();
+        return data instanceof FireObject
+          ? data
+          : new (resolveRelationType(entry.type))(snapshot);
+      };
+      const resolved = Array.isArray(entry.raw)
+        ? entry.raw
+            .map(hydrate)
+            .filter((value): value is FireObject<any> => Boolean(value))
+        : hydrate(entry.raw);
+      fireDataMap.get(entry.model)?.values.set(entry.key, resolved);
+    }
+
+    return [...models];
+  }
+
+  /**
    * Finds a document by id.
    *
    * @param id - Document id.
@@ -344,6 +449,58 @@ export abstract class FireObject<
       .doc(Model.documentId(id))
       .get();
     return snapshot.exists ? (snapshot.data() ?? null) : null;
+  }
+
+  /**
+   * Finds several documents by id.
+   *
+   * Ids are fetched in chunks of 30 using Firestore's `documentId in` filter.
+   * Input order is preserved and missing documents are omitted.
+   *
+   * @param ids - Document ids.
+   * @param params - Values for non-document path placeholders.
+   * @returns The matching models in input order.
+   * @throws `QueryError` when Firestore rejects the query.
+   */
+  static async findMany<T extends FireObject<any>>(
+    this: ModelConstructor<T>,
+    ids: ReadonlyArray<string>,
+    params: Record<string, string> = {},
+  ): Promise<T[]> {
+    const Model = modelConstructor(this);
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length === 0) return [];
+
+    const collection = Model.collection(params);
+    const chunks: string[][] = [];
+    for (let index = 0; index < uniqueIds.length; index += 30)
+      chunks.push(uniqueIds.slice(index, index + 30));
+
+    const found = new Map<string, T>();
+    try {
+      const snapshots = await Promise.all(
+        chunks.map((chunk) =>
+          collection
+            .where(
+              FieldPath.documentId(),
+              'in',
+              chunk.map((id) => Model.documentId(id)),
+            )
+            .get(),
+        ),
+      );
+      for (const snapshot of snapshots)
+        for (const document of snapshot.docs) {
+          const model = document.data();
+          if (model) found.set(document.id, model);
+        }
+    } catch (error) {
+      throw new QueryError('Firestore findMany query failed', error);
+    }
+
+    return uniqueIds
+      .map((id) => found.get(Model.documentId(id)))
+      .filter((model): model is T => Boolean(model));
   }
 
   /**
@@ -695,6 +852,18 @@ export abstract class FireObject<
   }
 
   /**
+   * Loads and caches reference-backed relations on this instance.
+   *
+   * @param fields - Relation property names. Defaults to every relation.
+   * @returns This instance, after its relations are cached.
+   */
+  async load(...fields: string[]): Promise<this> {
+    const Model = this.constructor as FireObjectConstructor<this>;
+    await Model.populate([this], ...fields);
+    return this;
+  }
+
+  /**
    * Returns the document id referenced by a relation field.
    *
    * @param propertyKey - Name of a field holding a model or document reference.
@@ -702,7 +871,7 @@ export abstract class FireObject<
    */
   getRefId(propertyKey: string): string | null {
     const value = fireDataMap.get(this)?.values.get(propertyKey);
-    if (value instanceof DocumentReference || value instanceof FireObject) {
+    if (isDocumentReference(value) || value instanceof FireObject) {
       return value.id || null;
     }
     return null;

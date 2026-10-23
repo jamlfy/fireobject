@@ -4,6 +4,7 @@ import type {
   DocumentData,
   DocumentSnapshot,
   FieldPath,
+  Filter,
   Firestore,
   OrderByDirection,
   Query,
@@ -66,10 +67,17 @@ export interface FireObjectConstructor<
   ): Promise<T[]>;
   /** Finds a document by id. */
   find(id: string, params?: Record<string, string>): Promise<T | null>;
+  /** Finds several documents by id. */
+  findMany(
+    ids: ReadonlyArray<string>,
+    params?: Record<string, string>,
+  ): Promise<T[]>;
   /** Finds a document by id or throws `NotFoundError`. */
   findOrFail(id: string, params?: Record<string, string>): Promise<T>;
   /** Returns every document in the collection. */
   all(params?: Record<string, string>): Promise<T[]>;
+  /** Loads and caches reference-backed relations for several models. */
+  populate(models: ReadonlyArray<T>, ...fields: string[]): Promise<T[]>;
   /** Creates and persists a model. */
   create(
     data: Partial<ModelData<T>>,
@@ -95,7 +103,9 @@ export interface FireObjectConstructor<
   count(params?: Record<string, string>): Promise<number>;
   /** Checks whether a document exists. */
   exists(id: string, params?: Record<string, string>): Promise<boolean>;
-  /** Starts a typed query builder. */
+  /** Starts a typed query builder from a composed filter. */
+  where(filter: Filter): import('./query').QueryBuilder<T>;
+  /** Starts a typed query builder from a field filter. */
   where<K extends ModelField<T>>(
     field: K | FieldPath,
     operator: WhereFilterOp,
