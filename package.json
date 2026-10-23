@@ -1,6 +1,6 @@
 {
   "name": "fireobject",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Firestore ORM with typed CRUD, query builder, hooks, validation, unique fields, timestamps, soft deletes, and subcollections for Google Cloud Firestore",
   "license": "MIT",
   "author": "Jamlfy",
