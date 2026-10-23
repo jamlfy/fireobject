@@ -252,9 +252,10 @@ the collection you can pass both values explicitly:
 
 ```typescript
 const collection = Version.collection({
-  parent: 'Packages/demo',
+  parent: 'demo',
   version: '1.0.0',
 });
+// Document: Packages/demo/Versions/1.0.0
 ```
 
 ### Existing collection or collection group
@@ -642,6 +643,28 @@ import { FireObject } from 'fireobject';
 // or
 import { FireObject } from 'fireobject/orm';
 ```
+
+### How the package selects JS or TypeScript
+
+The published package contains compiled JavaScript and the original TypeScript
+sources. The consumer's tool decides which entry to use through the standard
+`package.json` conditions:
+
+| Consumer | `package.json` field/condition | File |
+| --- | --- | --- |
+| Node.js ESM | `exports["."].import` | `dist/index.js` |
+| Node.js CommonJS | `exports["."].require` | `dist/index.cjs` |
+| TypeScript ESM | `exports["."].import.types` | `dist/index.d.ts` |
+| TypeScript CommonJS | `exports["."].require.types` | `dist/index.d.cts` |
+| Bundlers with `source` support | top-level `source` | `src/index.ts` |
+| TypeScript versions without `exports` support | `typesVersions` | `dist/index.d.ts` |
+
+Node.js never executes TypeScript directly. TypeScript reads the declaration
+files during type checking, while the runtime loads the compiled `.js` or
+`.cjs` file. The `src` directory is included so source maps and bundlers that
+understand the `source` field can work with the original `.ts` code.
+
+The same conditions are available for the `fireobject/orm` subpath.
 
 ### Type checking and decorators
 

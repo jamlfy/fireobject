@@ -24,6 +24,7 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "source": "./src/index.ts",
   "exports": {
     ".": {
       "import": {
@@ -33,7 +34,8 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
-      }
+      },
+      "default": "./dist/index.js"
     },
     "./orm": {
       "import": {
@@ -43,15 +45,32 @@
       "require": {
         "types": "./dist/orm/index.d.cts",
         "default": "./dist/orm/index.cjs"
-      }
+      },
+      "default": "./dist/orm/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "orm": [
+        "dist/orm/index.d.ts"
+      ],
+      "*": [
+        "dist/index.d.ts"
+      ]
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "sideEffects": false,
   "engines": {
     "node": ">=18"
+  },
+  "packageManager": "pnpm@12.11.2",
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "@google-cloud/firestore": ">=7 <9"
