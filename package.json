@@ -1,0 +1,74 @@
+{
+  "name": "fireobject",
+  "version": "0.1.0",
+  "description": "Firestore ORM with decorators, validation, atomic unique fields, and subcollections for Google Cloud Firestore",
+  "license": "MIT",
+  "author": "Jamlfy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jamlfy/fireobject.git"
+  },
+  "homepage": "https://github.com/jamlfy/fireobject#readme",
+  "bugs": {
+    "url": "https://github.com/jamlfy/fireobject/issues"
+  },
+  "keywords": [
+    "firestore",
+    "orm",
+    "decorator",
+    "google-cloud",
+    "firebase",
+    "typescript"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./orm": {
+      "import": {
+        "types": "./dist/orm/index.d.ts",
+        "default": "./dist/orm/index.js"
+      },
+      "require": {
+        "types": "./dist/orm/index.d.cts",
+        "default": "./dist/orm/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@google-cloud/firestore": ">=7 <9"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
+  },
+  "devDependencies": {
+    "@google-cloud/firestore": "^8.5.0",
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "~5.9.2",
+    "vitest": "^2.1.8"
+  }
+}
