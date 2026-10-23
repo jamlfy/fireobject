@@ -1,4 +1,13 @@
-/** Convert dates and Firestore timestamps to a valid JavaScript Date. */
+/**
+ * Converts a date-like value into a valid JavaScript `Date`.
+ *
+ * Accepts `Date` instances, strings, millisecond timestamps, Firestore
+ * `Timestamp` objects, and plain `{ seconds, nanoseconds }` objects (including
+ * the `_seconds`/`_nanoseconds` shape used by some serializers).
+ *
+ * @param value - Date-like value to convert.
+ * @returns A valid `Date`, or `undefined` when the value cannot be converted.
+ */
 export function toDate(value: unknown): Date | undefined {
   try {
     let date: Date;

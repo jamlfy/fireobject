@@ -1,3 +1,9 @@
+/**
+ * Public ORM entry point.
+ *
+ * Re-exports the model base class, decorators, validation helpers, errors, and
+ * public types.
+ */
 export { Connector } from './connector';
 export { converter } from './converter';
 export { field } from './field';
@@ -12,7 +18,6 @@ export {
   UniqueFieldConflictError,
   type UniqueFieldOptions,
 } from './unique-metadata';
-export { setFirestore, getFirestore } from './config';
 export type {
   Collection,
   ConstructorORM,

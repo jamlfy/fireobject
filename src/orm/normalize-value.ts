@@ -1,11 +1,21 @@
 import { Timestamp } from '@google-cloud/firestore';
 import { toDate } from './date';
 
+/** Strategy that detects and normalizes a specific kind of value. */
 export interface ValueNormalizer {
+  /** Returns `true` when this normalizer handles the value. */
   matches(value: unknown): boolean;
+  /** Returns the normalized representation of the value. */
   normalize(value: unknown): unknown;
 }
 
+/**
+ * Checks whether a value is a plain object (not a class instance or SDK
+ * object).
+ *
+ * @param value - Value to inspect.
+ * @returns `true` for objects with `Object.prototype` or `null` prototypes.
+ */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== 'object') return false;
   const prototype = Object.getPrototypeOf(value);
@@ -13,8 +23,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 // Add future conversions here, in precedence order. The first match wins.
+/** Built-in value normalizers, evaluated in order. */
 const normalizers: readonly ValueNormalizer[] = [
   {
+    /**
+     * Detects Firestore timestamps and plain timestamp-shaped objects.
+     *
+     * @param value - Value to inspect.
+     * @returns `true` when the value looks like a timestamp.
+     */
     matches(value) {
       if (value instanceof Timestamp) return true;
       if (!isPlainObject(value) || Reflect.ownKeys(value).length !== 2)
@@ -26,11 +43,22 @@ const normalizers: readonly ValueNormalizer[] = [
           Object.prototype.hasOwnProperty.call(value, '_nanoseconds'))
       );
     },
+    /** Converts a timestamp to a `Date`, keeping the value if invalid. */
     normalize: (value) => toDate(value) ?? value,
   },
 ];
 
-/** Normalize ORM values without mutating inputs or traversing SDK instances. */
+/**
+ * Normalizes ORM values without mutating inputs or traversing SDK instances.
+ *
+ * Timestamp-like values become `Date` instances. Arrays and plain objects are
+ * traversed recursively, preserving identity when nothing changes. SDK
+ * instances, class instances, buffers, maps, and primitives are returned
+ * untouched.
+ *
+ * @param value - Value to normalize.
+ * @returns The normalized value (possibly the original reference).
+ */
 export function normalizeValue(value: unknown): unknown {
   for (const normalizer of normalizers) {
     if (normalizer.matches(value)) return normalizer.normalize(value);

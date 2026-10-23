@@ -15,11 +15,44 @@ type ConnectorDecorator = <T extends ConstructorORM<FireObject>>(
   context?: ClassDecoratorContext<T>,
 ) => T | void;
 
+/**
+ * Binds a model class to a Firestore collection.
+ *
+ * Accepts either a Firestore instance plus a collection pattern
+ * (`Users/:user`), or an already-created collection / collection group. The
+ * decorator stores the resolved collection and the Firestore instance as static
+ * members of the model so `FireObject.collection()` and
+ * `FireObject.collectionGroup()` can work without extra configuration.
+ *
+ * When the pattern contains placeholders, the collection is resolved lazily
+ * through `FireObject.collection(params)`.
+ *
+ * @param db - Firestore instance used by the model.
+ * @param pattern - Collection path, optionally with `:param` placeholders.
+ * @returns A class decorator that configures the model.
+ */
 export function Connector(db: Firestore, pattern: string): ConnectorDecorator;
+/**
+ * Binds a model class to an existing Firestore collection or collection group.
+ *
+ * The optional `parent` reference is stored as `ParentCollection` and can be
+ * used by models that need to know their parent context.
+ *
+ * @param db - Collection or collection group bound to the model.
+ * @param parent - Optional parent collection or collection group.
+ * @returns A class decorator that configures the model.
+ */
 export function Connector(
   db: CollectionReference<DocumentData> | CollectionGroup<DocumentData>,
   parent?: CollectionReference<DocumentData> | CollectionGroup<DocumentData>,
 ): ConnectorDecorator;
+/**
+ * Implementation of the `Connector` decorator.
+ *
+ * @param dbOrCollection - Firestore instance, collection, or collection group.
+ * @param patternOrParent - Collection pattern or optional parent collection.
+ * @returns A class decorator that configures the model.
+ */
 export function Connector(
   dbOrCollection:
     | Firestore
@@ -28,6 +61,12 @@ export function Connector(
   patternOrParent?:
     string | CollectionReference<DocumentData> | CollectionGroup<DocumentData>,
 ) {
+  /**
+   * Configures the decorated model class.
+   *
+   * @param target - Model constructor.
+   * @returns The same constructor, optionally annotated with static members.
+   */
   return function decorator<T extends ConstructorORM<FireObject>>(
     target: T,
   ): T | void {
@@ -48,9 +87,13 @@ export function Connector(
       configurable: false,
     });
 
-    if (pattern) {
+    const firestore = pattern
+      ? (dbOrCollection as Firestore)
+      : (source as { firestore?: Firestore } | undefined)?.firestore;
+
+    if (firestore) {
       Object.defineProperty(target, 'Firestore', {
-        value: dbOrCollection,
+        value: firestore,
         writable: false,
         enumerable: false,
         configurable: false,

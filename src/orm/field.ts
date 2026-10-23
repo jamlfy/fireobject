@@ -6,12 +6,33 @@ import { normalizeValue } from './normalize-value';
 type FireObjectType = new (data: Record<string, unknown>) => FireObject;
 type FireObjectTypeThunk = FireObjectType | (() => FireObjectType);
 
+/**
+ * Resolves a model constructor that may be provided directly or lazily through
+ * a thunk.
+ *
+ * Lazily resolving the type avoids circular imports between related models.
+ *
+ * @param type - Model constructor or function returning it.
+ * @returns The resolved model constructor.
+ */
 function resolveType(type: FireObjectTypeThunk): FireObjectType {
   return type.prototype instanceof FireObject
     ? (type as FireObjectType)
     : (type as () => FireObjectType)();
 }
 
+/**
+ * Declares a model property backed by the ORM state map.
+ *
+ * The property getter reads from an internal `WeakMap`, so model instances do
+ * not need to initialize every field. The setter normalizes incoming values
+ * (for example Firestore timestamps to `Date`) and runs the supplied
+ * validators, storing the first validation error for `isValid()`.
+ *
+ * @param validationFn - Validators executed on every assignment.
+ * @param subDocType - Optional model type used to hydrate nested objects.
+ * @returns A property decorator.
+ */
 export function field(
   validationFn: ValidatorFn[] = [],
   subDocType?: FireObjectTypeThunk,
@@ -22,6 +43,11 @@ export function field(
     Object.defineProperty(target, key, {
       configurable: true,
       enumerable: true,
+      /**
+       * Reads the stored value and hydrates nested models on demand.
+       *
+       * @returns The current field value.
+       */
       get(this: FireObject): unknown {
         const data = fireDataMap.get(this);
         let value = data?.values.get(key);
@@ -38,6 +64,14 @@ export function field(
         }
         return value;
       },
+      /**
+       * Normalizes, validates, and stores a new field value.
+       *
+       * Validation does not throw; the error is recorded and exposed through
+       * `getErrors()` / `isValid()`.
+       *
+       * @param value - New field value.
+       */
       set(this: FireObject, value: unknown): void {
         if (!fireDataMap.has(this)) {
           fireDataMap.set(this, { values: new Map(), errors: new Map() });

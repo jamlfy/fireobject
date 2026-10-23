@@ -1,5 +1,4 @@
 import { FireObject, field, converter } from '../../src/orm/index';
-import { setFirestore } from '../../src/orm/config';
 import {
   CollectionReference,
   DocumentSnapshot,
@@ -123,11 +122,11 @@ describe('FireObject', () => {
   });
 
   it('rejects a parameterized path with missing values', () => {
-    setFirestore({
-      collection: vi.fn(),
-    } as unknown as import('@google-cloud/firestore').Firestore);
     class PatternFireObject extends FireObject {
       static CollectionPattern = 'Packages/:packageId/Versions/:version';
+      static Firestore = {
+        collection: vi.fn(),
+      } as unknown as import('@google-cloud/firestore').Firestore;
       beforeSave(): void {
         return;
       }
