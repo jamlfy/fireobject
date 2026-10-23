@@ -1,10 +1,14 @@
-import type { ValidatorFn } from './types';
+import type {
+  FieldOptions,
+  FireObjectTypeThunk,
+  ValidatorFn,
+} from './types';
 import { FireObject } from './object';
+import { fieldMetadata, fieldValidators } from './field-metadata';
 import { fireDataMap } from './state';
 import { normalizeValue } from './normalize-value';
 
 type FireObjectType = new (data: Record<string, unknown>) => FireObject;
-type FireObjectTypeThunk = FireObjectType | (() => FireObjectType);
 
 /**
  * Resolves a model constructor that may be provided directly or lazily through
@@ -17,7 +21,7 @@ type FireObjectTypeThunk = FireObjectType | (() => FireObjectType);
  */
 function resolveType(type: FireObjectTypeThunk): FireObjectType {
   return type.prototype instanceof FireObject
-    ? (type as FireObjectType)
+    ? (type as unknown as FireObjectType)
     : (type as () => FireObjectType)();
 }
 
@@ -29,16 +33,46 @@ function resolveType(type: FireObjectTypeThunk): FireObjectType {
  * (for example Firestore timestamps to `Date`) and runs the supplied
  * validators, storing the first validation error for `isValid()`.
  *
- * @param validationFn - Validators executed on every assignment.
+ * @param validators - Validators executed on every assignment.
  * @param subDocType - Optional model type used to hydrate nested objects.
  * @returns A property decorator.
  */
 export function field(
-  validationFn: ValidatorFn[] = [],
+  validators?: ValidatorFn[],
   subDocType?: FireObjectTypeThunk,
-) {
+): PropertyDecorator;
+/**
+ * Declares a model property with advanced field options.
+ *
+ * @param options - Validation, conversion, default, and mutability settings.
+ * @returns A property decorator.
+ */
+export function field(options?: FieldOptions): PropertyDecorator;
+/**
+ * Implementation of the `@field` decorator.
+ *
+ * @param validatorsOrOptions - Validator list or field options object.
+ * @param subDocType - Optional nested model type.
+ * @returns A property decorator.
+ */
+export function field(
+  validatorsOrOptions?: ValidatorFn[] | FieldOptions,
+  subDocType?: FireObjectTypeThunk,
+): PropertyDecorator {
+  const options: FieldOptions = Array.isArray(validatorsOrOptions)
+    ? { validators: validatorsOrOptions, subDocType }
+    : {
+        ...(validatorsOrOptions ?? {}),
+        ...(subDocType ? { subDocType } : {}),
+      };
+
   return function (target: object, propertyKey: string | symbol): void {
     const key = String(propertyKey);
+    const metadata = fieldMetadata.get(target) ?? new Map<string, FieldOptions>();
+    metadata.set(key, options);
+    fieldMetadata.set(target, metadata);
+
+    const validators = fieldValidators(key, options);
 
     Object.defineProperty(target, key, {
       configurable: true,
@@ -52,12 +86,12 @@ export function field(
         const data = fireDataMap.get(this);
         let value = data?.values.get(key);
         if (
-          subDocType &&
+          options.subDocType &&
           value &&
           typeof value === 'object' &&
           !(value instanceof FireObject)
         ) {
-          value = new (resolveType(subDocType))(
+          value = new (resolveType(options.subDocType))(
             value as Record<string, unknown>,
           );
           data?.values.set(key, value);
@@ -81,7 +115,7 @@ export function field(
         const normalized = normalizeValue(value);
 
         let errorMessage: string | null = null;
-        for (const validator of validationFn) {
+        for (const validator of validators) {
           const result = validator(normalized, data.values);
           if (typeof result !== 'boolean' || !result) {
             errorMessage =

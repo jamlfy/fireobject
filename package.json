@@ -1,7 +1,7 @@
 {
   "name": "fireobject",
   "version": "0.1.0",
-  "description": "Firestore ORM with decorators, validation, atomic unique fields, and subcollections for Google Cloud Firestore",
+  "description": "Firestore ORM with typed CRUD, query builder, hooks, validation, unique fields, timestamps, soft deletes, and subcollections for Google Cloud Firestore",
   "license": "MIT",
   "author": "Jamlfy",
   "repository": {
@@ -18,7 +18,10 @@
     "decorator",
     "google-cloud",
     "firebase",
-    "typescript"
+    "typescript",
+    "query-builder",
+    "hooks",
+    "soft-delete"
   ],
   "type": "module",
   "main": "./dist/index.cjs",

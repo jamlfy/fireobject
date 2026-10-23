@@ -50,9 +50,9 @@ export const minLength =
     `Should contain at least ${minimum} characters`;
 
 /**
- * Creates a validator that enforces a maximun length.
+ * Creates a validator that enforces a maximum length.
  *
- * @param max - Maximun number of characters/items.
+ * @param max - Maximum number of characters/items.
  * @returns A validator for strings and arrays.
  */
 export const maxLength =
@@ -64,7 +64,7 @@ export const maxLength =
   (value: unknown): boolean | string =>
     ((typeof value === 'string' || Array.isArray(value)) &&
       value.length <= max) ||
-    `Should contain at more than ${max} characters`;
+    `Should contain at most ${max} characters`;
 
 /**
  * Creates a validator that ensures another field in the model has a value.

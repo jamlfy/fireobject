@@ -12,34 +12,10 @@ export interface UniqueFieldOptions {
   allowOwnerId?: boolean;
 }
 
-/**
- * Error raised when a field fails validation while saving inside a
- * transaction.
- */
-export class FieldValidationError extends Error {
-  /**
-   * @param field - Field that failed validation.
-   * @param message - Validation message.
-   */
-  constructor(
-    public readonly field: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'FieldValidationError';
-  }
-}
-
-/** Error raised when a unique value is already reserved by another document. */
-export class UniqueFieldConflictError extends Error {
-  /**
-   * @param field - Unique field that conflicts.
-   */
-  constructor(public readonly field: string) {
-    super(`${field} is already taken`);
-    this.name = 'UniqueFieldConflictError';
-  }
-}
+export {
+  FieldValidationError,
+  UniqueFieldConflictError,
+} from './errors';
 
 /** Unique-field metadata keyed by the decorated prototype. */
 export const uniqueMetadata = new WeakMap<

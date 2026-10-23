@@ -3,8 +3,10 @@
 A small, decorator-based ORM for Google Cloud Firestore.
 
 `fireobject` gives Firestore models a familiar class-based API: typed fields,
-validation, unique fields backed by atomic reservations, references,
-subcollections, parameterized collection paths, and transaction helpers.
+validation, static CRUD helpers, a chainable query builder, lifecycle hooks,
+automatic timestamps, soft deletes, unique fields backed by atomic reservations,
+references, subcollections, parameterized collection paths, bulk operations, and
+transaction helpers.
 
 - Works with `@google-cloud/firestore` (Node.js).
 - Written in TypeScript and published with ESM + CommonJS builds.
@@ -23,12 +25,19 @@ subcollections, parameterized collection paths, and transaction helpers.
 - [Defining a model](#defining-a-model)
 - [Connecting a model to Firestore](#connecting-a-model-to-firestore)
 - [Fields and validation](#fields-and-validation)
+- [Field options](#field-options)
+- [Hooks](#hooks)
 - [Unique fields](#unique-fields)
 - [References](#references)
 - [Subcollections](#subcollections)
+- [Static CRUD](#static-crud)
 - [Queries](#queries)
 - [Saving data](#saving-data)
+- [Timestamps and soft deletes](#timestamps-and-soft-deletes)
 - [Transactions and partial saves](#transactions-and-partial-saves)
+- [Bulk operations, batches, and transactions](#bulk-operations-batches-and-transactions)
+- [Field values](#field-values)
+- [Errors](#errors)
 - [Document ids](#document-ids)
 - [Validation helpers](#validation-helpers)
 - [Development](#development)
@@ -174,12 +183,19 @@ projects, emulators, or test doubles.
 
 ## Defining a model
 
-Extend `FireObject` and implement `beforeSave`:
+Extend `FireObject` with a data interface to type field names and CRUD inputs:
 
 ```typescript
 import { FireObject, Validation, field } from 'fireobject';
 
-export class Plan extends FireObject {
+interface PlanData {
+  id: string;
+  name: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export class Plan extends FireObject<PlanData> {
   @field([Validation.isRequired])
   declare id: string;
 
@@ -187,16 +203,16 @@ export class Plan extends FireObject {
   name!: string;
 
   @field([Validation.isDate])
-  createdAt!: Date;
+  createdAt?: Date;
 
-  async beforeSave(): Promise<void> {
-    this.createdAt ??= new Date();
-  }
+  @field([Validation.isDate])
+  updatedAt?: Date;
 }
 ```
 
-`beforeSave` is abstract, so every model must implement it. It can be `async`,
-and it runs before validation and before the Firestore write.
+`beforeSave`, `beforeCreate`, and `beforeUpdate` are optional and can be
+`async`. They run before validation and before the Firestore write. See
+[Hooks](#hooks).
 
 Plain fields are optional by design: they can be `undefined` until assigned.
 `data()` omits `undefined` values, so Firestore only receives fields that were
@@ -339,6 +355,75 @@ automatically normalized to `Date` when assigned or loaded from a snapshot.
 
 ---
 
+## Field options
+
+Pass an options object instead of a validator array:
+
+```typescript
+@field({
+  validators: [Validation.isRequired, Validation.isString],
+  nullable: false,
+  immutable: true,
+})
+email!: string;
+
+@field({ default: 'member' })
+role?: string;
+
+@field({
+  serialize: (value) => String(value).trim().toLowerCase(),
+  deserialize: (value) => String(value),
+})
+slug?: string;
+```
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `validators` | `ValidatorFn[]` | Validators applied to the field. |
+| `subDocType` | model or thunk | Hydrates nested plain objects into models. |
+| `default` | value or `() => value` | Applied when a new model omits the field. |
+| `serialize` | `(value, values) => unknown` | Converts the in-memory value before writing. |
+| `deserialize` | `(value, values) => unknown` | Converts a loaded value before normalization. |
+| `nullable` | `boolean` | When `false`, rejects `null` and `undefined` on save. |
+| `immutable` | `boolean` | Rejects changes after the document has been persisted. |
+
+The legacy signature `@field(validators, subDocType)` remains supported.
+
+---
+
+## Hooks
+
+Lifecycle hooks are optional methods on the model:
+
+```typescript
+class User extends FireObject<UserData> {
+  beforeSave() {}
+  beforeCreate() {}
+  afterCreate() {}
+  beforeUpdate() {}
+  afterUpdate() {}
+  beforeDelete() {}
+  afterDelete() {}
+  afterSave() {}
+}
+```
+
+| Hook | When it runs |
+| --- | --- |
+| `beforeSave` | Before every save, after automatic timestamps are applied. |
+| `beforeCreate` | Before creating a new document. |
+| `afterCreate` | After a document is created. |
+| `beforeUpdate` | Before updating an existing document. |
+| `afterUpdate` | After an existing document is updated. |
+| `beforeDelete` | Before a hard or soft delete. |
+| `afterDelete` | After a hard or soft delete. |
+| `afterSave` | After every successful save. |
+
+Hooks can be `async`. `prepareSave()` runs pre-write hooks and leaves
+post-write hooks to `save()`.
+
+---
+
 ## Unique fields
 
 `@uniqueField` enforces uniqueness through a reservation collection:
@@ -454,7 +539,72 @@ Subcollection properties are read-only.
 
 ---
 
+## Static CRUD
+
+Every model exposes typed static helpers:
+
+```typescript
+const user = await User.find('alice');          // User | null
+const user = await User.findOrFail('alice');    // throws NotFoundError
+const users = await User.all();                 // User[]
+const exists = await User.exists('alice');      // boolean
+const total = await User.count();               // number
+
+const created = await User.create({ name: 'Alice' });        // auto id
+const withId = await User.create({ name: 'Alice' }, 'alice'); // explicit id
+const updated = await User.update('alice', { name: 'Alicia' });
+const upserted = await User.upsert({ id: 'alice', name: 'Alice' });
+const deleted = await User.delete('alice');                  // boolean
+```
+
+`create`, `update`, `upsert`, and `delete` run the normal save/delete hooks and
+validation. `create()` uses Firestore's atomic create semantics: if the id
+already exists it throws `ConflictError` instead of overwriting the document.
+The second argument accepts either an id string or an options object:
+
+```typescript
+await User.create({ name: 'Alice' }, { id: 'alice' });
+await User.update('alice', { name: 'Alicia' }, { params: { tenant: 'acme' } });
+```
+
+For parameterized collections, pass the non-document path placeholders:
+
+```typescript
+await Version.find('1.0.0', { package: 'demo' });
+await Version.all({ package: 'demo' });
+```
+
+---
+
 ## Queries
+
+### Query builder
+
+```typescript
+const users = await User.where('active', '==', true)
+  .orderBy('createdAt', 'desc')
+  .limit(50)
+  .get();
+
+const first = await User.where('email', '==', email).first();
+const total = await User.where('active', '==', true).count();
+```
+
+Supported builder methods: `where`, `orderBy`, `limit`, `offset`, `startAt`,
+`startAfter`, `endBefore`, `endAt`, `get`, `first`, `count`, and `paginate`.
+
+Cursor pagination returns the next cursor and a `hasMore` flag:
+
+```typescript
+const page = await User.orderBy('createdAt').paginate(25);
+
+const next = await User.orderBy('createdAt').paginate({
+  limit: 25,
+  startAfter: page.nextCursor,
+});
+```
+
+`where` field names are restricted to `keyof` the model data interface.
 
 ### Query with constraints
 
@@ -508,6 +658,8 @@ await user.save();
 - Applies validation checks for unique fields.
 - Updates an existing document when the instance came from a snapshot.
 - Uses `set()` when the document has an id but no snapshot.
+- Uses `create()` and throws `ConflictError` when `{ create: true }` is passed
+  and the document already exists.
 - Uses `add()` when the document has no id; the generated id is assigned to
   `this.id` and the snapshot is refreshed.
 
@@ -519,6 +671,57 @@ await user.save({ fields: ['name', 'updatedAt'] });
 
 Only the listed fields are written. Unique fields are always included when
 needed to keep reservations consistent.
+
+---
+
+## Timestamps and soft deletes
+
+Both features are opt-in per model.
+
+### Automatic timestamps
+
+```typescript
+class User extends FireObject<UserData> {
+  static timestamps = true;
+
+  @field() declare createdAt?: Date;
+  @field() declare updatedAt?: Date;
+}
+```
+
+`createdAt` is set on creation and `updatedAt` on every save. Custom field names
+are supported:
+
+```typescript
+static timestamps = { createdAt: 'created', updatedAt: 'modified' };
+```
+
+### Soft deletes
+
+```typescript
+class User extends FireObject<UserData> {
+  static softDelete = true;
+
+  @field() declare deletedAt?: Date;
+}
+```
+
+With soft deletes enabled, `save()` is unchanged but `delete()` writes
+`deletedAt` instead of removing the document. Use `{ hard: true }` to delete
+permanently:
+
+```typescript
+await user.delete();                 // soft delete
+await User.delete('alice');          // soft delete
+await User.delete('alice', { hard: true });
+await user.restore();                // removes deletedAt
+```
+
+The default field is `deletedAt`; customize it with
+`static softDelete = { field: 'removedAt', value: new Date() }`.
+
+Soft-deleted documents remain visible to queries. Filter them explicitly when
+your application needs to hide them.
 
 ---
 
@@ -558,6 +761,101 @@ Errors:
 
 ---
 
+## Bulk operations, batches, and transactions
+
+```typescript
+const users = await User.createMany([
+  { name: 'Alice' },
+  { name: 'Bob' },
+]);
+
+await User.saveMany(users);
+await User.saveMany(users, { fields: ['name'] });
+const deleted = await User.deleteMany(['alice', 'bob']); // count
+await User.deleteMany(['alice', 'bob'], { hard: true });
+```
+
+Bulk helpers run in order and preserve hooks and unique-field guarantees.
+
+Use a native `WriteBatch` when you do not need ORM hook semantics:
+
+```typescript
+const batch = User.batch();
+batch.set(User.collection().doc('alice'), { name: 'Alice' });
+batch.delete(User.collection().doc('bob'));
+await batch.commit();
+```
+
+Run a Firestore transaction through the model to reuse its configured database:
+
+```typescript
+const result = await User.transaction(
+  async (transaction) => {
+    const snapshot = await transaction.get(User.collection().doc('alice'));
+    return snapshot.exists;
+  },
+  { maxAttempts: 5 },
+);
+```
+
+---
+
+## Field values
+
+Firestore sentinel helpers are available directly and under the `FieldValue`
+namespace:
+
+```typescript
+import {
+  FieldValue,
+  arrayRemove,
+  arrayUnion,
+  deleteField,
+  increment,
+  serverTimestamp,
+} from 'fireobject';
+
+await User.collection().doc('alice').update({
+  visits: increment(1),
+  tags: arrayUnion('beta'),
+  updatedAt: serverTimestamp(),
+  legacyField: deleteField(),
+});
+```
+
+Sentinels are passed through by `data()`, so Firestore applies them atomically
+when they are used in native Firestore writes.
+
+---
+
+## Errors
+
+All library errors extend `FireObjectError` and expose a stable `code`:
+
+| Error | Code | Meaning |
+| --- | --- | --- |
+| `ValidationError` | `VALIDATION_ERROR` | One or more fields are invalid. |
+| `FieldValidationError` | `VALIDATION_ERROR` | A specific field failed validation. |
+| `NotFoundError` | `NOT_FOUND` | `findOrFail` or `update` found no document. |
+| `ConflictError` | `CONFLICT` | A write conflicts with existing data. |
+| `UniqueFieldConflictError` | `CONFLICT` | A unique reservation belongs to another document. |
+| `QueryError` | `QUERY_ERROR` | A Firestore query failed. |
+| `TransactionError` | `TRANSACTION_ERROR` | A transaction could not be completed. |
+
+```typescript
+import { NotFoundError } from 'fireobject';
+
+try {
+  await User.findOrFail('missing');
+} catch (error) {
+  if (error instanceof NotFoundError) {
+    console.log(error.collection, error.id); // "Users" "missing"
+  }
+}
+```
+
+---
+
 ## Document ids
 
 Firestore document ids cannot contain `/`. Use `documentId()` to encode values:
@@ -580,6 +878,7 @@ Available under the `Validation` namespace:
 | `isString` | Requires a string. |
 | `isEmail` | Requires a string containing `@`. |
 | `minLength(n)` | Requires a string or array with at least `n` items. |
+| `maxLength(n)` | Requires a string or array with at most `n` items. |
 | `cleanRef(field)` | Requires another field to have a value. |
 | `nonEmptyString(message?)` | Requires a non-empty, non-whitespace string. |
 | `nonEmptyArray(message?)` | Requires a non-empty array. |
