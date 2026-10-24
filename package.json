@@ -28,6 +28,9 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "source": "./src/index.ts",
+  "bin": {
+    "fireobject-mcp": "./mcp/server.mjs"
+  },
   "exports": {
     ".": {
       "import": {
@@ -66,7 +69,11 @@
   "files": [
     "dist",
     "docs",
-    "src"
+    "mcp",
+    "src",
+    "AGENTS.md",
+    "llms.txt",
+    "llms-full.txt"
   ],
   "sideEffects": false,
   "engines": {
@@ -84,6 +91,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "mcp": "node ./mcp/server.mjs",
+    "docs:llms": "node ./scripts/build-llms.mjs",
     "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "devDependencies": {

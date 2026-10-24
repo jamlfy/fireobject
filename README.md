@@ -51,8 +51,15 @@ Start with [Requirements](#requirements), [Installation](#installation), and
 - [Errors](./docs/errors.md)
 - [Validation helpers](./docs/validation-helpers.md)
 - [Troubleshooting](./docs/troubleshooting.md)
+- [MCP server](./docs/mcp.md)
 - [Project scripts and development](./docs/development.md#project-scripts)
 - [Publishing a release](./docs/development.md#publishing-a-release)
+
+### AI agents
+
+- [AGENTS.md](./AGENTS.md): repository commands, architecture, and conventions.
+- [llms.txt](./llms.txt): compact documentation index.
+- [llms-full.txt](./llms-full.txt): complete documentation in one file.
 
 ---
 

@@ -1,0 +1,33 @@
+# fireobject
+
+> Firestore ORM with typed CRUD, validation, query builder, hooks, unique
+> fields, timestamps, soft deletes, references, and subcollections.
+
+Version 1.0.1. Node.js 18 or newer. Peer dependency:
+`@google-cloud/firestore` (`>=7 <9`).
+
+This file is a compact index for AI agents. Read `AGENTS.md` for repository
+workflows and use the MCP server for searchable documentation.
+
+## Documentation
+
+- [crud](./docs/crud.md): Static CRUD, saving data, and document ids.
+- [development](./docs/development.md): Project scripts, local workflow, build, CI, and releases.
+- [errors](./docs/errors.md): Error hierarchy and error codes.
+- [field-values](./docs/field-values.md): Using native Firestore FieldValue sentinels.
+- [lifecycle](./docs/lifecycle.md): Timestamps, soft deletes, transactions, batches, and bulk writes.
+- [mcp](./docs/mcp.md): Running and configuring the documentation MCP server.
+- [models](./docs/models.md): Models, connectors, fields, validation, field options, and hooks.
+- [queries](./docs/queries.md): Query builder, composed filters, cursors, and pagination.
+- [relations](./docs/relations.md): References, eager loading, and subcollections.
+- [troubleshooting](./docs/troubleshooting.md): Common errors and fixes.
+- [unique-fields](./docs/unique-fields.md): Atomic unique field reservations.
+- [validation-helpers](./docs/validation-helpers.md): Built-in validation helpers.
+
+## Agent resources
+
+- [README](./README.md): Library overview and quick start.
+- [AGENTS.md](./AGENTS.md): Commands, architecture, and conventions.
+- [Full documentation](./llms-full.txt): All documentation in one file.
+- [MCP server](./mcp/server.mjs): Zero-dependency stdio server.
+- [MCP setup](./docs/mcp.md): Client configuration and tools.
